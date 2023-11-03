@@ -11,9 +11,44 @@ contract Poker {
         address[10] players; // there will never be more than 10 players
     }
 
-    mapping(address => bytes) clientKeySig;
+    mapping(address => bytes32) clientKeySig;
 
     mapping(uint => Table) tables;
+
+    uint _id;
+
+    event TableCreated(uint id, address indexed creator);
+
+    /*
+        Called by players to start a table. They should provide a minimum buy in and a table limit. 
+        This should create a new Table and  keep it in storage
+    */
+    function startTable(uint _minBuyIn, uint8 _playerLimit) external payable {
+        // check that the creator has a registered key
+        if (clientKeySig[msg.sender] == bytes32(0)) revert();
+
+        tables[_id] = Table(
+            ++_id,
+            _minBuyIn,
+            _playerLimit,
+            false,
+            msg.sender,
+            [
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0),
+                address(0)
+            ]
+        );
+
+        emit TableCreated(_id, msg.sender);
+    }
 
     /*
         handels the registration of a off-chain client side signing key. This will store
@@ -21,12 +56,6 @@ contract Poker {
         A player must have a registered key before joining a table.
     */
     function register(bytes calldata _sig) external {}
-
-    /*
-        Called by players to start a table. They should provide a minimum buy in and a table limit. 
-        This should create a new Table and  keep it in storage
-    */
-    function startTable(uint _minBuyIn, uint8 _playerLimit) external payable {}
 
     /*
         called by players to joing a table. They must have a signature registered, and
