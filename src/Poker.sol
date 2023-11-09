@@ -64,11 +64,16 @@ contract Poker {
     function join(uint _gameId, address _clientAddy, bytes memory _sig) public {
         // the game must exist already
         if (_gameId > _id) revert();
+        Table memory table = tables[_gameId];
 
         // check that the sig isn't already registered in the match
-        if (!isInGame(msg.sender, _gameId)) revert();
+        if (!isInGame(msg.sender, table)) revert();
 
+        // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
+
+        //add the caller to the game if not full
+        if (isAtCapacity(table)) {}
     }
 
     /*
@@ -88,8 +93,61 @@ contract Poker {
         bytes calldata _history
     ) internal view returns (bool) {}
 
+    function isAtCapacity(uint _gameId) public view returns (bool) {
+        Table memory table = tables[_gameId];
+        return (table.playerLimit == getPlayerCount(table));
+    }
+
+    function isAtCapacity(Table memory table) internal pure returns (bool) {
+        return (table.playerLimit == getPlayerCount(table));
+    }
+
+    function getPlayerCount(uint _gameId) public view returns (uint8) {
+        Table memory table = tables[_gameId];
+        for (uint8 i = 0; i < table.playerLimit; ) {
+            if (table.players[i] == address(0)) {
+                return i;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        return table.playerLimit;
+    }
+
+    function getPlayerCount(Table memory table) internal pure returns (uint8) {
+        for (uint8 i = 0; i < table.playerLimit; ) {
+            if (table.players[i] == address(0)) {
+                return i;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        return 0;
+    }
+
     function isInGame(address _addy, uint _gameId) public view returns (bool) {
         Table memory table = tables[_gameId];
+        for (uint8 i = 0; i < table.playerLimit; ) {
+            if (table.players[i] == _addy) {
+                return true;
+            } else if (table.players[i] == address(0)) {
+                return false;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
+    }
+
+    function isInGame(
+        address _addy,
+        Table memory table
+    ) internal pure returns (bool) {
         for (uint8 i = 0; i < table.playerLimit; ) {
             if (table.players[i] == _addy) {
                 return true;
