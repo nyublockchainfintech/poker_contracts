@@ -108,8 +108,10 @@ contract Poker {
         address _signer,
         address _clientAddy,
         bytes memory _sig
-    ) internal view returns (bool) {
+    ) internal pure {
         bytes32 msgHash = getMsgHash(_signer, _clientAddy);
+        address recovered = recoverSigner(msgHash, _sig);
+        if (recovered != _clientAddy) revert();
     }
 
     function getMsgHash(
@@ -123,5 +125,37 @@ contract Poker {
             keccak256(
                 abi.encodePacked("\x19Ethereum Signed Message:\n32", msgHash)
             );
+    }
+
+    function recoverSigner(
+        bytes32 _msgHash,
+        bytes memory _sig
+    ) public pure returns (address) {
+        (bytes32 r, bytes32 s, uint8 v) = splitSignature(_sig);
+        return ecrecover(_msgHash, v, r, s);
+    }
+
+    function splitSignature(
+        bytes memory _sig
+    ) public pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(_sig.length == 65, "invalid signature length");
+
+        assembly {
+            /*
+            First 32 bytes stores the length of the signature
+
+            add(sig, 32) = pointer of sig + 32
+            effectively, skips first 32 bytes of signature
+
+            mload(p) loads next 32 bytes starting at the memory address p into memory
+            */
+
+            // first 32 bytes, after the length prefix
+            r := mload(add(_sig, 32))
+            // second 32 bytes
+            s := mload(add(_sig, 64))
+            // final byte (first byte of the next 32 bytes)
+            v := byte(0, mload(add(_sig, 96)))
+        }
     }
 }
