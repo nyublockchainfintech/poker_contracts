@@ -2,20 +2,26 @@
 pragma solidity ^0.8.13;
 
 contract Poker {
+    uint8 constant MAX_PLAYERS = 10;
+
     struct Table {
         uint id;
         uint minBuyIn;
         uint8 playerLimit;
         bool inPlay;
         address initiator;
-        address[10] players; // there will never be more than 10 players
+        address[MAX_PLAYERS] players; // there will never be more than 10 players
     }
 
-    mapping(address => bytes32) clientKeySig;
+    struct ClientKeySig {
+        uint gameId;
+        bytes32 sig;
+    }
 
+    mapping(address => ClientKeySig[]) clientKeySig;
     mapping(uint => Table) tables;
 
-    uint _id;
+    uint private _id;
 
     event TableCreated(uint id, address indexed creator);
 
@@ -25,7 +31,7 @@ contract Poker {
     */
     function startTable(uint _minBuyIn, uint8 _playerLimit) external payable {
         // check that the creator has a registered key
-        if (clientKeySig[msg.sender] == bytes32(0)) revert();
+        if (clientKeySig[msg.sender].length == 0) revert();
 
         tables[_id] = Table(
             ++_id,
@@ -51,17 +57,19 @@ contract Poker {
     }
 
     /*
-        handels the registration of a off-chain client side signing key. This will store
-        the signature of msg.sender in storage so it can later be used to verify signed actions.
-        A player must have a registered key before joining a table.
+        this function is responsible both for registering a addy for the client to sign actions 
+        with for this specific game, verifying this signature, and setting this player
+        in the game in storage
     */
-    function register(bytes calldata _sig) external {}
+    function join(uint _gameId, address _clientAddy, bytes memory _sig) public {
+        // the game must exist already
+        if (_gameId > _id) revert();
 
-    /*
-        called by players to joing a table. They must have a signature registered, and
-        they must commit at least the min buy in to join
-    */
-    function joinTable(uint _id) external payable {}
+        // check that the sig isn't already registered in the match
+        if (!isInGame(msg.sender, _gameId)) revert();
+
+        verifySig(msg.sender, _clientAddy, _sig);
+    }
 
     /*
         called by players to leave a table and take their profits. Before moving money,
@@ -79,4 +87,41 @@ contract Poker {
         uint _id,
         bytes calldata _history
     ) internal view returns (bool) {}
+
+    function isInGame(address _addy, uint _gameId) public view returns (bool) {
+        Table memory table = tables[_gameId];
+        for (uint8 i = 0; i < table.playerLimit; ) {
+            if (table.players[i] == _addy) {
+                return true;
+            } else if (table.players[i] == address(0)) {
+                return false;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
+    }
+
+    // verifies that _addy did indeed sign a message that registers a client priv key
+    function verifySig(
+        address _signer,
+        address _clientAddy,
+        bytes memory _sig
+    ) internal view returns (bool) {
+        bytes32 msgHash = getMsgHash(_signer, _clientAddy);
+    }
+
+    function getMsgHash(
+        address _player,
+        address _playerClientAddy
+    ) public pure returns (bytes32) {
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(_player, _playerClientAddy)
+        );
+        return
+            keccak256(
+                abi.encodePacked("\x19Ethereum Signed Message:\n32", msgHash)
+            );
+    }
 }
