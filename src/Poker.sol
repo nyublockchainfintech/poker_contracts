@@ -4,6 +4,17 @@ pragma solidity ^0.8.13;
 contract Poker {
     uint8 constant MAX_PLAYERS = 10;
 
+    struct ClientAddy {
+        uint gameId;
+        address clientAddy;
+    }
+
+    // not implemented yet but every player should be modeled by this struct not just an address
+    struct Player {
+        uint buyIn;
+        address addy;
+    }
+
     struct Table {
         uint id;
         uint minBuyIn;
@@ -13,28 +24,38 @@ contract Poker {
         address[MAX_PLAYERS] players; // there will never be more than 10 players
     }
 
-    struct ClientKeySig {
-        uint gameId;
-        bytes32 sig;
-    }
+    // each player can have multiple client private keys if they are multitabling (1 per game)
+    mapping(address player => ClientAddy[]) clientAddy;
+    mapping(uint gameId => Table) tables;
 
-    mapping(address => ClientKeySig[]) clientKeySig;
-    mapping(uint => Table) tables;
-
+    // incrementing id to indetify games
     uint private _id;
 
-    event TableCreated(uint id, address indexed creator);
+    // indexed event to query events easier - will be needed for FE
+    event TableCreated(uint indexed id, address indexed creator);
 
     /*
         Called by players to start a table. They should provide a minimum buy in and a table limit. 
         This should create a new Table and  keep it in storage
     */
-    function startTable(uint _minBuyIn, uint8 _playerLimit) external payable {
+    function startTable(
+        uint _minBuyIn,
+        uint8 _playerLimit,
+        address _clientAddy,
+        bytes memory _sig
+    ) external payable {
         // check that the creator has a registered key
-        if (clientKeySig[msg.sender].length == 0) revert();
+        // verify that msg.sender does indeed have access to the priv key on client
+        verifySig(msg.sender, _clientAddy, _sig);
 
+        //add sig to storage
+        clientAddy[msg.sender].push(ClientAddy(++_id, _clientAddy));
+
+        //
+
+        // store table at next available id
         tables[_id] = Table(
-            ++_id,
+            _id,
             _minBuyIn,
             _playerLimit,
             false,
@@ -72,8 +93,14 @@ contract Poker {
         // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
 
+        //add sig to storage
+        clientAddy[msg.sender].push(ClientAddy(_gameId, _clientAddy));
+
         //add the caller to the game if not full
-        if (isAtCapacity(table)) {}
+        if (!isAtCapacity(table)) {
+            // transfer tokens into contract
+            // add player to contract stroage
+        }
     }
 
     /*
