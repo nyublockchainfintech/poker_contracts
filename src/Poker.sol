@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-contract Poker {
+import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+
+contract Poker is ReentrancyGuard {
     uint8 constant MAX_PLAYERS = 10;
 
     struct ClientAddy {
@@ -19,6 +22,7 @@ contract Poker {
         uint id;
         uint minBuyIn;
         uint8 playerLimit;
+        uint8 playerCount;
         bool inPlay;
         address initiator;
         address[MAX_PLAYERS] players; // there will never be more than 10 players
@@ -29,35 +33,46 @@ contract Poker {
     mapping(uint gameId => Table) tables;
 
     // incrementing id to indetify games
-    uint private _id;
+    uint private _currId;
+
+    IERC20 private _paymentToken;
 
     // indexed event to query events easier - will be needed for FE
     event TableCreated(uint indexed id, address indexed creator);
+    event JoinedGame(address indexed player, uint indexed id);
+
+    constructor(address paymentToken) {
+        _paymentToken = IERC20(paymentToken);
+    }
 
     /*
         Called by players to start a table. They should provide a minimum buy in and a table limit. 
         This should create a new Table and  keep it in storage
     */
+    // think about how to structure logic to remove reentrancy modifier to save gas
     function startTable(
         uint _minBuyIn,
         uint8 _playerLimit,
         address _clientAddy,
+        uint _buyIn,
         bytes memory _sig
-    ) external payable {
-        // check that the creator has a registered key
+    ) external payable nonReentrant {
+        if (_buyIn < _minBuyIn) revert();
+
         // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
 
         //add sig to storage
-        clientAddy[msg.sender].push(ClientAddy(++_id, _clientAddy));
+        clientAddy[msg.sender].push(ClientAddy(++_currId, _clientAddy));
 
-        //
+        _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
 
         // store table at next available id
-        tables[_id] = Table(
-            _id,
+        tables[_currId] = Table(
+            _currId,
             _minBuyIn,
             _playerLimit,
+            1,
             false,
             msg.sender,
             [
@@ -74,7 +89,7 @@ contract Poker {
             ]
         );
 
-        emit TableCreated(_id, msg.sender);
+        emit TableCreated(_currId, msg.sender);
     }
 
     /*
@@ -82,13 +97,24 @@ contract Poker {
         with for this specific game, verifying this signature, and setting this player
         in the game in storage
     */
-    function join(uint _gameId, address _clientAddy, bytes memory _sig) public {
+
+    // think about how to structure logic to remove reentrancy modifier to save gas
+    function join(
+        uint _gameId,
+        address _clientAddy,
+        bytes memory _sig,
+        uint _buyIn
+    ) public payable nonReentrant {
         // the game must exist already
-        if (_gameId > _id) revert();
+        if (_gameId > _currId) revert();
+
+        // used downstream for checks
         Table memory table = tables[_gameId];
 
+        if (_buyIn < table.minBuyIn) revert();
+
         // check that the sig isn't already registered in the match
-        if (!isInGame(msg.sender, table)) revert();
+        if (isInGame(msg.sender, table)) revert();
 
         // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
@@ -99,7 +125,13 @@ contract Poker {
         //add the caller to the game if not full
         if (!isAtCapacity(table)) {
             // transfer tokens into contract
+            _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
+
             // add player to contract stroage
+            tables[_gameId].players[table.playerCount] = msg.sender;
+            ++tables[_gameId].playerCount;
+
+            emit JoinedGame(msg.sender, _gameId);
         }
     }
 
@@ -125,6 +157,7 @@ contract Poker {
         return (table.playerLimit == getPlayerCount(table));
     }
 
+    // overload for internal gas management reasons
     function isAtCapacity(Table memory table) internal pure returns (bool) {
         return (table.playerLimit == getPlayerCount(table));
     }
@@ -143,6 +176,7 @@ contract Poker {
         return table.playerLimit;
     }
 
+    // overload for internal gas management reasons
     function getPlayerCount(Table memory table) internal pure returns (uint8) {
         for (uint8 i = 0; i < table.playerLimit; ) {
             if (table.players[i] == address(0)) {
@@ -171,6 +205,7 @@ contract Poker {
         return false;
     }
 
+    // overload for internal gas management reasons
     function isInGame(
         address _addy,
         Table memory table

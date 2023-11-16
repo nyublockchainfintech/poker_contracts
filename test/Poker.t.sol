@@ -7,7 +7,5 @@ import {Poker} from "../src/Poker.sol";
 contract CounterTest is Test {
     Poker public poker;
 
-    function setUp() public {
-        poker = new Poker();
-    }
+    function setUp() public {}
 }
