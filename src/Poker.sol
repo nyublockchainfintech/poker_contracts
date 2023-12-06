@@ -12,12 +12,6 @@ contract Poker is ReentrancyGuard {
         address clientAddy;
     }
 
-    // not implemented yet but every player should be modeled by this struct not just an address
-    struct Player {
-        uint buyIn;
-        address addy;
-    }
-
     struct Table {
         uint id;
         uint minBuyIn;
@@ -25,6 +19,7 @@ contract Poker is ReentrancyGuard {
         uint8 playerCount;
         bool inPlay;
         address initiator;
+        uint amountInPlay;
         address[MAX_PLAYERS] players; // there will never be more than 10 players
     }
 
@@ -75,6 +70,7 @@ contract Poker is ReentrancyGuard {
             1,
             false,
             msg.sender,
+            _buyIn,
             [
                 address(0),
                 address(0),
@@ -130,6 +126,7 @@ contract Poker is ReentrancyGuard {
             // add player to contract stroage
             tables[_gameId].players[table.playerCount] = msg.sender;
             ++tables[_gameId].playerCount;
+            tables[_gameId].amountInPlay += _buyIn;
 
             emit JoinedGame(msg.sender, _gameId);
         }
@@ -140,7 +137,40 @@ contract Poker is ReentrancyGuard {
         this function must verify hand history. This function must also remove the signature
         associated with the caller 
     */
-    function leaveTable(uint _id, bytes calldata _history) external {}
+    function leaveTable(
+        uint _id,
+        bytes[] memory _state,
+        uint[] memory _balances
+    ) external {
+        Table memory table = tables[_id];
+        if (!isInGame(msg.sender, table)) revert();
+        if (_state.length != _balances.length) revert();
+        if (_state.length != table.players.length) revert();
+
+        verifyHistory(table, _state, _balances);
+
+        --tables[_id].playerCount;
+        uint index = findPlayer(table.players, msg.sender);
+
+        tables[_id].players[index] = address(0);
+
+        // ensures that users cannot collude to steal other table money
+        if (_balances[index] > table.amountInPlay) revert();
+        _paymentToken.transfer(msg.sender, _balances[index]);
+    }
+
+    function findPlayer(
+        address[MAX_PLAYERS] memory _players,
+        address _addy
+    ) internal view returns (uint) {
+        for (uint i = 0; i < _players.length; ) {
+            if (_players[i] == _addy) return i;
+            unchecked {
+                ++i;
+            }
+        }
+        return MAX_PLAYERS + 1;
+    }
 
     /*
         This function should verify all the hand histore provided for a specified table.
@@ -148,9 +178,30 @@ contract Poker is ReentrancyGuard {
         moves before sending money out
     */
     function verifyHistory(
-        uint _id,
-        bytes calldata _history
-    ) internal view returns (bool) {}
+        Table memory _table,
+        bytes[] memory _state,
+        uint[] memory _balances
+    ) internal view {
+        for (uint8 i = 0; i < _state.length; ) {
+            bytes32 msgHash = getStateMsgHash(_table.players, _balances);
+            address recovered = recoverSigner(msgHash, _state[i]);
+            if (recovered != _table.players[i]) revert();
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function getStateMsgHash(
+        address[MAX_PLAYERS] memory _players,
+        uint[] memory _balances
+    ) public pure returns (bytes32) {
+        bytes32 msgHash = keccak256(abi.encodePacked(_players, _balances));
+        return
+            keccak256(
+                abi.encodePacked("\x19Ethereum Signed Message:\n32", msgHash)
+            );
+    }
 
     function isAtCapacity(uint _gameId) public view returns (bool) {
         Table memory table = tables[_gameId];
@@ -195,8 +246,6 @@ contract Poker is ReentrancyGuard {
         for (uint8 i = 0; i < table.playerLimit; ) {
             if (table.players[i] == _addy) {
                 return true;
-            } else if (table.players[i] == address(0)) {
-                return false;
             }
             unchecked {
                 ++i;
@@ -213,8 +262,6 @@ contract Poker is ReentrancyGuard {
         for (uint8 i = 0; i < table.playerLimit; ) {
             if (table.players[i] == _addy) {
                 return true;
-            } else if (table.players[i] == address(0)) {
-                return false;
             }
             unchecked {
                 ++i;
@@ -261,15 +308,6 @@ contract Poker is ReentrancyGuard {
         require(_sig.length == 65, "invalid signature length");
 
         assembly {
-            /*
-            First 32 bytes stores the length of the signature
-
-            add(sig, 32) = pointer of sig + 32
-            effectively, skips first 32 bytes of signature
-
-            mload(p) loads next 32 bytes starting at the memory address p into memory
-            */
-
             // first 32 bytes, after the length prefix
             r := mload(add(_sig, 32))
             // second 32 bytes
