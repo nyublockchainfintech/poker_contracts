@@ -7,11 +7,6 @@ import "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 contract Poker is ReentrancyGuard {
     uint8 constant MAX_PLAYERS = 10;
 
-    struct ClientAddy {
-        uint gameId;
-        address clientAddy;
-    }
-
     struct Table {
         uint id;
         uint minBuyIn;
@@ -24,8 +19,9 @@ contract Poker is ReentrancyGuard {
     }
 
     // each player can have multiple client private keys if they are multitabling (1 per game)
-    mapping(address player => ClientAddy[]) clientAddy;
-    mapping(uint gameId => Table) tables;
+    mapping(address player => mapping(uint gameId => address))
+        private clientAddy;
+    mapping(uint gameId => Table) public tables;
 
     // incrementing id to indetify games
     uint private _currId;
@@ -58,7 +54,7 @@ contract Poker is ReentrancyGuard {
         verifySig(msg.sender, _clientAddy, _sig);
 
         //add sig to storage
-        clientAddy[msg.sender].push(ClientAddy(++_currId, _clientAddy));
+        clientAddy[msg.sender][++_currId] = _clientAddy;
 
         _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
 
@@ -68,11 +64,11 @@ contract Poker is ReentrancyGuard {
             _minBuyIn,
             _playerLimit,
             1,
-            false,
+            true,
             msg.sender,
             _buyIn,
             [
-                address(0),
+                msg.sender,
                 address(0),
                 address(0),
                 address(0),
@@ -95,7 +91,7 @@ contract Poker is ReentrancyGuard {
     */
 
     // think about how to structure logic to remove reentrancy modifier to save gas
-    function join(
+    function joinTable(
         uint _gameId,
         address _clientAddy,
         bytes memory _sig,
@@ -116,20 +112,19 @@ contract Poker is ReentrancyGuard {
         verifySig(msg.sender, _clientAddy, _sig);
 
         //add sig to storage
-        clientAddy[msg.sender].push(ClientAddy(_gameId, _clientAddy));
+        clientAddy[msg.sender][_gameId] = _clientAddy;
 
         //add the caller to the game if not full
-        if (!isAtCapacity(table)) {
-            // transfer tokens into contract
-            _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
+        if (isAtCapacity(table)) revert();
+        // transfer tokens into contract
+        _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
 
-            // add player to contract stroage
-            tables[_gameId].players[table.playerCount] = msg.sender;
-            ++tables[_gameId].playerCount;
-            tables[_gameId].amountInPlay += _buyIn;
+        // add player to contract stroage
+        tables[_gameId].players[table.playerCount] = msg.sender;
+        ++tables[_gameId].playerCount;
+        tables[_gameId].amountInPlay += _buyIn;
 
-            emit JoinedGame(msg.sender, _gameId);
-        }
+        emit JoinedGame(msg.sender, _gameId);
     }
 
     /*
@@ -141,7 +136,7 @@ contract Poker is ReentrancyGuard {
         uint _id,
         bytes[] memory _state,
         uint[] memory _balances
-    ) external {
+    ) external nonReentrant {
         Table memory table = tables[_id];
         if (!isInGame(msg.sender, table)) revert();
         if (_state.length != _balances.length) revert();
@@ -157,6 +152,14 @@ contract Poker is ReentrancyGuard {
         // ensures that users cannot collude to steal other table money
         if (_balances[index] > table.amountInPlay) revert();
         _paymentToken.transfer(msg.sender, _balances[index]);
+
+        // remove client addy from storage
+        delete clientAddy[msg.sender][_id];
+
+        // if the table is empty, remove it from storage
+        if (table.playerCount == 0) {
+            delete tables[_id];
+        }
     }
 
     function findPlayer(
@@ -205,40 +208,12 @@ contract Poker is ReentrancyGuard {
 
     function isAtCapacity(uint _gameId) public view returns (bool) {
         Table memory table = tables[_gameId];
-        return (table.playerLimit == getPlayerCount(table));
+        return (table.playerLimit == table.playerCount);
     }
 
     // overload for internal gas management reasons
     function isAtCapacity(Table memory table) internal pure returns (bool) {
-        return (table.playerLimit == getPlayerCount(table));
-    }
-
-    function getPlayerCount(uint _gameId) public view returns (uint8) {
-        Table memory table = tables[_gameId];
-        for (uint8 i = 0; i < table.playerLimit; ) {
-            if (table.players[i] == address(0)) {
-                return i;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        return table.playerLimit;
-    }
-
-    // overload for internal gas management reasons
-    function getPlayerCount(Table memory table) internal pure returns (uint8) {
-        for (uint8 i = 0; i < table.playerLimit; ) {
-            if (table.players[i] == address(0)) {
-                return i;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        return 0;
+        return (table.playerLimit == table.playerCount);
     }
 
     function isInGame(address _addy, uint _gameId) public view returns (bool) {
@@ -275,7 +250,7 @@ contract Poker is ReentrancyGuard {
         address _signer,
         address _clientAddy,
         bytes memory _sig
-    ) internal pure {
+    ) internal view {
         bytes32 msgHash = getMsgHash(_signer, _clientAddy);
         address recovered = recoverSigner(msgHash, _sig);
         if (recovered != _clientAddy) revert();
@@ -315,5 +290,9 @@ contract Poker is ReentrancyGuard {
             // final byte (first byte of the next 32 bytes)
             v := byte(0, mload(add(_sig, 96)))
         }
+    }
+
+    function getTable(uint _id) public view returns (Table memory) {
+        return tables[_id];
     }
 }
