@@ -3,6 +3,7 @@ pragma solidity ^0.8.13;
 
 import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import "forge-std/console.sol";
 
 contract Poker is ReentrancyGuard {
     uint8 constant MAX_PLAYERS = 10;
@@ -140,7 +141,7 @@ contract Poker is ReentrancyGuard {
         Table memory table = tables[_id];
         if (!isInGame(msg.sender, table)) revert();
         if (_state.length != _balances.length) revert();
-        if (_state.length != table.players.length) revert();
+        if (_state.length != table.playerCount) revert();
 
         verifyHistory(table, _state, _balances);
 
@@ -148,19 +149,42 @@ contract Poker is ReentrancyGuard {
         uint index = findPlayer(table.players, msg.sender);
 
         tables[_id].players[index] = address(0);
+        if (index != table.playerCount) {
+            shiftDown(_id, index);
+        }
 
         // ensures that users cannot collude to steal other table money
         if (_balances[index] > table.amountInPlay) revert();
+        tables[_id].amountInPlay -= _balances[index];
         _paymentToken.transfer(msg.sender, _balances[index]);
 
         // remove client addy from storage
         delete clientAddy[msg.sender][_id];
 
         // if the table is empty, remove it from storage
-        if (table.playerCount == 0) {
+
+        if (tables[_id].playerCount == 0) {
+            tables[_id].inPlay = false;
             delete tables[_id];
         }
     }
+
+    function shiftDown(uint _id, uint indexFrom) internal {
+        // shift down players array
+        Table storage table = tables[_id];
+        for (uint i = indexFrom; i < table.playerCount + 1; ) {
+            table.players[i] = table.players[i + 1];
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /*
+        called by players to leave a table and take their profits. Before moving money,
+        this function must verify hand history. This function must also remove the signature
+        associated with the caller 
+    */
 
     function findPlayer(
         address[MAX_PLAYERS] memory _players,
@@ -185,10 +209,12 @@ contract Poker is ReentrancyGuard {
         bytes[] memory _state,
         uint[] memory _balances
     ) internal view {
-        for (uint8 i = 0; i < _state.length; ) {
+        for (uint8 i = 0; i < _table.playerCount; ) {
             bytes32 msgHash = getStateMsgHash(_table.players, _balances);
             address recovered = recoverSigner(msgHash, _state[i]);
-            if (recovered != _table.players[i]) revert();
+
+            if (recovered != clientAddy[_table.players[i]][_table.id]) revert();
+
             unchecked {
                 ++i;
             }
@@ -218,7 +244,7 @@ contract Poker is ReentrancyGuard {
 
     function isInGame(address _addy, uint _gameId) public view returns (bool) {
         Table memory table = tables[_gameId];
-        for (uint8 i = 0; i < table.playerLimit; ) {
+        for (uint8 i = 0; i < MAX_PLAYERS; ) {
             if (table.players[i] == _addy) {
                 return true;
             }
@@ -233,8 +259,8 @@ contract Poker is ReentrancyGuard {
     function isInGame(
         address _addy,
         Table memory table
-    ) internal pure returns (bool) {
-        for (uint8 i = 0; i < table.playerLimit; ) {
+    ) internal view returns (bool) {
+        for (uint8 i = 0; i < MAX_PLAYERS; ) {
             if (table.players[i] == _addy) {
                 return true;
             }
@@ -294,5 +320,11 @@ contract Poker is ReentrancyGuard {
 
     function getTable(uint _id) public view returns (Table memory) {
         return tables[_id];
+    }
+
+    function getPlayers(
+        uint _id
+    ) public view returns (address[MAX_PLAYERS] memory) {
+        return tables[_id].players;
     }
 }
