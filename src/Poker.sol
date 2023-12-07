@@ -25,7 +25,9 @@ contract Poker is ReentrancyGuard {
     mapping(uint gameId => Table) public tables;
 
     // incrementing id to indetify games
-    uint private _currId;
+    uint public _currId;
+
+    uint public _numPurgedGames;
 
     IERC20 private _paymentToken;
 
@@ -168,6 +170,7 @@ contract Poker is ReentrancyGuard {
 
         if (tables[_id].playerCount == 0) {
             tables[_id].inPlay = false;
+            ++_numPurgedGames;
             delete tables[_id];
         }
     }
@@ -330,5 +333,25 @@ contract Poker is ReentrancyGuard {
         uint _id
     ) public view returns (address[MAX_PLAYERS] memory) {
         return tables[_id].players;
+    }
+
+    /*
+    SHOULD ONLY BE CALLED OFF CHAIN
+    */
+    function getAllTables() public view returns (Table[] memory) {
+        Table[] memory allTables = new Table[](_currId - _numPurgedGames);
+        uint insertIndex = 0;
+        for (uint i = 0; i < _currId; ) {
+            if (tables[i].inPlay) {
+                allTables[insertIndex] = tables[i];
+                unchecked {
+                    ++insertIndex;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+        return allTables;
     }
 }

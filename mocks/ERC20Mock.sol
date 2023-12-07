@@ -6,7 +6,7 @@ import "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 contract ERC20Mock is ERC20 {
     constructor() ERC20("USDCMock", "USDC") {
-        _mint(msg.sender, 10000000);
+        _mint(msg.sender, 1000000000);
     }
 
     function mint(address account, uint256 amount) external {
