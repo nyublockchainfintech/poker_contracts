@@ -49,7 +49,7 @@ contract Poker is ReentrancyGuard {
         uint _buyIn,
         bytes memory _sig
     ) external payable nonReentrant {
-        if (_buyIn < _minBuyIn) revert();
+        if (_buyIn < _minBuyIn) revert("insufficient buy in");
 
         // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
@@ -99,15 +99,15 @@ contract Poker is ReentrancyGuard {
         uint _buyIn
     ) public payable nonReentrant {
         // the game must exist already
-        if (_gameId > _currId) revert();
+        if (_gameId > _currId) revert("game does not exist");
 
         // used downstream for checks
         Table memory table = tables[_gameId];
 
-        if (_buyIn < table.minBuyIn) revert();
+        if (_buyIn < table.minBuyIn) revert("insufficient buy in");
 
         // check that the sig isn't already registered in the match
-        if (isInGame(msg.sender, table)) revert();
+        if (isInGame(msg.sender, table)) revert("already in game");
 
         // verify that msg.sender does indeed have access to the priv key on client
         verifySig(msg.sender, _clientAddy, _sig);
@@ -116,7 +116,7 @@ contract Poker is ReentrancyGuard {
         clientAddy[msg.sender][_gameId] = _clientAddy;
 
         //add the caller to the game if not full
-        if (isAtCapacity(table)) revert();
+        if (isAtCapacity(table)) revert("game is full");
         // transfer tokens into contract
         _paymentToken.transferFrom(msg.sender, address(this), _buyIn);
 
@@ -139,9 +139,11 @@ contract Poker is ReentrancyGuard {
         uint[] memory _balances
     ) external nonReentrant {
         Table memory table = tables[_id];
-        if (!isInGame(msg.sender, table)) revert();
-        if (_state.length != _balances.length) revert();
-        if (_state.length != table.playerCount) revert();
+        if (!isInGame(msg.sender, table)) revert("must be in game");
+        if (_state.length != _balances.length)
+            revert("signatures and balances must be equal");
+        if (_state.length != table.playerCount)
+            revert("signatures don't match player count");
 
         verifyHistory(table, _state, _balances);
 
@@ -154,7 +156,8 @@ contract Poker is ReentrancyGuard {
         }
 
         // ensures that users cannot collude to steal other table money
-        if (_balances[index] > table.amountInPlay) revert();
+        if (_balances[index] > table.amountInPlay)
+            ("cannot withdraw more than table balance");
         tables[_id].amountInPlay -= _balances[index];
         _paymentToken.transfer(msg.sender, _balances[index]);
 
@@ -213,7 +216,8 @@ contract Poker is ReentrancyGuard {
             bytes32 msgHash = getStateMsgHash(_table.players, _balances);
             address recovered = recoverSigner(msgHash, _state[i]);
 
-            if (recovered != clientAddy[_table.players[i]][_table.id]) revert();
+            if (recovered != clientAddy[_table.players[i]][_table.id])
+                revert("invalid signature");
 
             unchecked {
                 ++i;
@@ -244,7 +248,7 @@ contract Poker is ReentrancyGuard {
 
     function isInGame(address _addy, uint _gameId) public view returns (bool) {
         Table memory table = tables[_gameId];
-        for (uint8 i = 0; i < MAX_PLAYERS; ) {
+        for (uint8 i = 0; i < table.playerCount; ) {
             if (table.players[i] == _addy) {
                 return true;
             }
@@ -260,7 +264,7 @@ contract Poker is ReentrancyGuard {
         address _addy,
         Table memory table
     ) internal view returns (bool) {
-        for (uint8 i = 0; i < MAX_PLAYERS; ) {
+        for (uint8 i = 0; i < table.playerCount; ) {
             if (table.players[i] == _addy) {
                 return true;
             }
@@ -279,7 +283,7 @@ contract Poker is ReentrancyGuard {
     ) internal view {
         bytes32 msgHash = getMsgHash(_signer, _clientAddy);
         address recovered = recoverSigner(msgHash, _sig);
-        if (recovered != _clientAddy) revert();
+        if (recovered != _clientAddy) revert("invalid signature");
     }
 
     function getMsgHash(
